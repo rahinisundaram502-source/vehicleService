@@ -1,0 +1,211 @@
+
+<!DOCTYPE html>
+<html ng-app="vehicleApp">
+<head>
+    <title>Vehicle Service Booking</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+    <style>
+        body { font-family: Arial; background: #eee; margin: 20px; }
+        .box { background: white; padding: 15px; margin: 15px auto; max-width: 800px; }
+        input, select, button { padding: 8px; margin: 5px; }
+        button { background: blue; color: white; border: 0; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid gray; padding: 8px; }
+        th { background: lightblue; }
+    </style>
+</head>
+<body ng-controller="appointmentCtrl">
+
+<div class="box">
+    <h1>Vehicle Service Booking</h1>
+
+    <form ng-submit="book()">
+        <input ng-model="booking.customerName"
+               placeholder="Customer Name" required>
+
+        <input ng-model="booking.vehicleNumber"
+               placeholder="Vehicle Number" required>
+
+        <select ng-model="booking.vehicleType"
+                ng-options="v for v in vehicleTypes" required>
+            <option value="">Select Vehicle</option>
+        </select>
+
+        <select ng-model="booking.serviceType"
+                ng-options="s as (s.name + ' - Rs.' + s.charge)
+                for s in servicecenter.services
+                if s.vehicleType == booking.vehicleType"
+                required>
+            <option value="">Select Service</option>
+        </select>
+
+        <p>Charge: Rs. {{booking.serviceType.charge || 0}}</p>
+
+        <button type="submit">
+            {{editId ? "Update Booking" : "Book Service"}}
+        </button>
+        <button type="button" ng-click="reset()">Clear</button>
+    </form>
+
+    <p>{{message}}</p>
+</div>
+
+<div class="box">
+    <h3>Available Services</h3>
+
+    <select ng-model="vehicleFilter">
+        <option value="">All Vehicles</option>
+        <option value="Two Wheeler">Two Wheeler</option>
+        <option value="Car">Car</option>
+    </select>
+
+    <table>
+        <tr><th>Vehicle</th><th>Service</th><th>Charge</th></tr>
+        <tr ng-repeat="s in servicecenter.services | vehicleFilter:vehicleFilter">
+            <td>{{s.vehicleType}}</td>
+            <td>{{s.name}}</td>
+            <td>Rs. {{s.charge}}</td>
+        </tr>
+    </table>
+</div>
+
+<div class="box">
+    <h3>Appointments</h3>
+    <table>
+        <tr>
+            <th>Customer</th><th>Vehicle</th><th>Type</th>
+            <th>Service</th><th>Charge</th><th>Action</th>
+        </tr>
+        <tr ng-repeat="a in appointments">
+            <td>{{a.customerName}}</td>
+            <td>{{a.vehicleNumber}}</td>
+            <td>{{a.vehicleType}}</td>
+            <td>{{a.serviceName}}</td>
+            <td>Rs. {{a.charge}}</td>
+            <td>
+                <button ng-click="edit(a)">Edit</button>
+                <button ng-click="cancel(a._id)">Cancel</button>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<script>
+var app = angular.module("vehicleApp", []);
+
+// 1. Service center: service types and charges
+app.service("servicecenter", function() {
+    this.services = [
+        {name: "General Service", vehicleType: "Two Wheeler", charge: 500},
+        {name: "Oil Change", vehicleType: "Two Wheeler", charge: 300},
+        {name: "General Service", vehicleType: "Car", charge: 1500},
+        {name: "Full Service", vehicleType: "Car", charge: 3000}
+    ];
+});
+
+// 2. Filter: two-wheelers and cars
+app.filter("vehicleFilter", function() {
+    return function(items, type) {
+        if (!type) return items;
+
+        return items.filter(function(s) {
+            return s.vehicleType === type;
+        });
+    };
+});
+
+// 3. Appointment service: backend CRUD requests
+app.service("appointmentService", function($http) {
+    this.get = function() {
+        return $http.get("/appointments");
+    };
+
+    this.book = function(data) {
+        return $http.post("/appointments", data);
+    };
+
+    this.update = function(id, data) {
+        return $http.put("/appointments/" + id, data);
+    };
+
+    this.cancel = function(id) {
+        return $http.delete("/appointments/" + id);
+    };
+});
+
+// 4. Dependency injection
+app.controller("appointmentCtrl",
+function($scope, servicecenter, appointmentService) {
+
+    $scope.servicecenter = servicecenter;
+    $scope.vehicleTypes = ["Two Wheeler", "Car"];
+    $scope.booking = {};
+    $scope.appointments = [];
+    $scope.editId = null;
+    $scope.message = "";
+
+    $scope.load = function() {
+        appointmentService.get().then(function(res) {
+            $scope.appointments = res.data;
+        });
+    };
+
+    // Book or update
+    $scope.book = function() {
+        var b = $scope.booking;
+
+        var data = {
+            customerName: b.customerName,
+            vehicleNumber: b.vehicleNumber,
+            vehicleType: b.vehicleType,
+            serviceName: b.serviceType.name,
+            charge: b.serviceType.charge
+        };
+
+        var request = $scope.editId
+            ? appointmentService.update($scope.editId, data)
+            : appointmentService.book(data);
+
+        request.then(function() {
+            $scope.message = "Booking saved successfully";
+            $scope.reset();
+            $scope.load();
+        }).catch(function() {
+            $scope.message = "Error saving booking";
+        });
+    };
+
+    // Edit appointment
+    $scope.edit = function(a) {
+        $scope.booking = {
+            customerName: a.customerName,
+            vehicleNumber: a.vehicleNumber,
+            vehicleType: a.vehicleType,
+            serviceType: $scope.servicecenter.services.find(function(s) {
+                return s.name === a.serviceName &&
+                       s.vehicleType === a.vehicleType;
+            })
+        };
+        $scope.editId = a._id;
+    };
+
+    // Cancel appointment
+    $scope.cancel = function(id) {
+        if (confirm("Cancel this booking?")) {
+            appointmentService.cancel(id).then(function() {
+                $scope.message = "Booking cancelled";
+                $scope.load();
+            });
+        }
+    };
+
+    $scope.reset = function() {
+        $scope.booking = {};
+        $scope.editId = null;
+    };
+
+    $scope.load();
+});
+</script>
+</body>
+</html>
